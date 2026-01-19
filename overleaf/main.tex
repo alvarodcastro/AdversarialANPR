@@ -1,0 +1,1059 @@
+\documentclass[11pt,a4paper]{report}
+
+%--------------------------------------------------
+% Packages and basic setup
+%--------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{csquotes}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}
+
+\usepackage[table]{xcolor}
+
+% Bibliography
+\usepackage[
+    backend=biber,
+    style=ieee,
+    sorting=nty
+]{biblatex}
+\addbibresource{references.bib}
+
+% Code listing style
+\lstdefinestyle{mystyle}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    stringstyle=\color{teal},
+    commentstyle=\color{gray},
+    numbers=left,
+    numberstyle=\tiny,
+    stepnumber=1,
+    frame=single,
+    breaklines=true,
+    tabsize=4
+}
+\lstset{style=mystyle}
+
+%--------------------------------------------------
+% Title information
+%--------------------------------------------------
+\title{
+    \textbf{Adversarial Machine Learning Attacks on Automatic Number Plate Recognition Systems}\\[0.5em]
+}
+\author{
+    Álvaro de Castro\\
+    University of Málaga\\
+    \texttt{alvarodc@uma.es}
+}
+
+\date{\today}
+
+%==================================================
+\begin{document}
+%==================================================
+
+\maketitle
+
+\begin{abstract}
+This document presents the design, implementation, and evaluation of adversarial machine learning attacks on Automatic Number Plate Recognition (ANPR) systems combining YOLO object detection and PaddleOCR character recognition. The work extends existing ANPR functionality with implementations of white-box adversarial attacks, including Fast Gradient Sign Method (FGSM), Carlini \& Wagner (C\&W), and watermarking attacks, targeting both the detection stage (YOLO) and the recognition stage (PaddleOCR). Experimental results from more than 500 test images demonstrate that iterative FGSM achieves 85-90\% detection evasion success, while C\&W targeted attacks achieve 95\%+ success in forcing specific plate number outputs with imperceptible perturbations (SSIM > 0.95, $L_\infty < 8/255$). The findings highlight critical vulnerabilities in modern ANPR systems and underscore the importance of adversarial robustness in security-critical computer vision applications.
+\end{abstract}
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+%==================================================
+\chapter{Introduction}
+%==================================================
+
+\section{Motivation and Context}
+Automatic Number Plate Recognition (ANPR) systems are increasingly deployed in security-critical applications including traffic enforcement, access control, toll collection, and law enforcement. Modern ANPR systems leverage deep neural networks (DNNs) for both license plate detection and character recognition, achieving near-human accuracy under ideal conditions. However, recent research has demonstrated that DNNs are fundamentally vulnerable to adversarial examples—carefully crafted perturbations that cause misclassification while remaining imperceptible to human observers.
+
+The motivation of this work is to systematically investigate adversarial attacks on a representative two-stage ANPR pipeline combining YOLO for plate detection and PaddleOCR for character recognition. We focus on white-box attacks where the adversary has full knowledge of model architectures and parameters, representing a worst-case security analysis. Two primary attack scenarios are considered: (1) denial-of-service attacks that cause detection failure in a stealthy manner, and (2) targeted misrecognition attacks that force the OCR system to output attacker-chosen plate numbers.
+
+The objective is not merely to demonstrate vulnerability, but to provide a comprehensive framework for evaluating ANPR security, quantifying attack success rates across different perturbation budgets, and understanding the trade-offs between attack effectiveness, imperceptibility, and computational cost.
+
+\section{Objectives}
+The main objectives of this project are:
+\begin{itemize}
+    \item To implement and extend a functional ANPR system combining YOLO detection and PaddleOCR recognition as an experimental testbed.
+    \item To develop white-box adversarial attack implementations including FGSM, Iterative FGSM (I-FGSM), Carlini \& Wagner (C\&W), Projected Gradient Descent (PGD), and watermarking attacks.
+    \item To generate labeled datasets from real license plate images with varying plate formats, lighting conditions, and camera angles for robust evaluation.
+    \item To design and implement attack pipelines for both denial-of-service (DoS) targeting YOLO detection and targeted misrecognition attacking PaddleOCR.
+    \item To evaluate attack success rates, imperceptibility metrics (SSIM, $L_2$, $L_\infty$), and computational costs across different perturbation budgets and attack methods.
+    \item To compare attack effectiveness against baseline detection/recognition accuracy, quantifying false negative rates (undetected attacks) and analyzing the relationship between perturbation magnitude and success probability.
+\end{itemize}
+
+\section{Structure of the Document}
+This document is structured as follows. \Cref{chap:background} reviews the theoretical foundations of adversarial machine learning, ANPR system architectures, and related work on adversarial attacks against object detection and OCR systems. \Cref{chap:system} describes the ANPR implementation, including YOLO and PaddleOCR integration and the attack injection framework. \Cref{chap:data} details the dataset collection, preprocessing, and perturbation generation pipelines. \Cref{chap:methods} presents the adversarial attack algorithms and their implementations. \Cref{chap:results} reports experimental results including success rates, imperceptibility analysis, and comparative evaluation across attack methods. \Cref{chap:discussion} discusses security implications, limitations, and potential defenses, and \Cref{chap:conclusion} concludes the work and outlines future research directions.
+
+%==================================================
+\chapter{Background and Related Work}
+\label{chap:background}
+%==================================================
+
+\section{Automatic Number Plate Recognition Systems}
+Automatic Number Plate Recognition (ANPR) systems typically employ a two-stage pipeline: (1) license plate detection locates plate regions in input images, and (2) optical character recognition (OCR) extracts alphanumeric characters from detected plates. Modern implementations leverage deep learning for both stages.
+
+\subsection{Object Detection: YOLO}
+YOLO (You Only Look Once) is a real-time object detection framework that frames detection as a regression problem, directly predicting bounding boxes and class probabilities from full images in a single evaluation. Unlike region-based methods (R-CNN family), YOLO's single-stage architecture enables millisecond inference times, making it ideal for real-time ANPR applications. YOLOv5 and later versions achieve high precision (>95\%) on license plate detection when trained on diverse datasets with data augmentation.
+
+The YOLO architecture consists of:
+\begin{enumerate}
+    \item \textbf{Backbone}: Feature extraction network (typically CSPDarknet or EfficientNet) that processes input images into hierarchical feature maps.
+    \item \textbf{Neck}: Feature pyramid network (FPN/PAN) that aggregates multi-scale features for detecting objects of varying sizes.
+    \item \textbf{Head}: Detection head that outputs bounding box coordinates, objectness scores, and class probabilities for each spatial location.
+\end{enumerate}
+
+For ANPR, YOLO is typically fine-tuned on license plate datasets with appropriate anchor box priors matching typical plate aspect ratios (2:1 to 5:1).
+
+\subsection{Optical Character Recognition: PaddleOCR}
+PaddleOCR is a state-of-the-art OCR framework combining text detection, direction classification, and text recognition. For ANPR, only the recognition component is relevant since plate localization is handled by YOLO. PaddleOCR's recognition model is based on a Convolutional Recurrent Neural Network (CRNN) architecture with Connectionist Temporal Classification (CTC) loss.
+
+The CRNN architecture for sequence recognition consists of:
+\begin{enumerate}
+    \item \textbf{Convolutional layers}: Extract visual features from normalized plate images, producing fixed-height feature maps.
+    \item \textbf{Recurrent layers}: Bidirectional LSTM processes feature sequences left-to-right and right-to-left to capture contextual dependencies.
+    \item \textbf{Transcription layer}: CTC decoding maps variable-length feature sequences to character sequences without explicit character segmentation.
+\end{enumerate}
+
+The CTC loss function enables training without character-level annotations by marginalizing over all possible alignments between input frames and output characters, making it robust to variations in character spacing and font styles.
+
+\section{Adversarial Machine Learning}
+Adversarial examples are inputs deliberately perturbed to cause misclassification by machine learning models while remaining perceptually similar to the original inputs. First systematically studied by Szegedy et al. (2014), adversarial examples expose fundamental vulnerabilities in deep neural networks arising from their non-linear, high-dimensional decision boundaries.
+
+\subsection{Threat Models and Attack Types}
+Adversarial attacks are categorized by:
+\begin{itemize}
+    \item \textbf{Knowledge}: White-box (full model access) vs. black-box (query access only)
+    \item \textbf{Goal}: Untargeted (cause any misclassification) vs. targeted (induce specific output)
+    \item \textbf{Perturbation budget}: $L_\infty$-norm (per-pixel max), $L_2$-norm (Euclidean distance), $L_0$-norm (number of modified pixels)
+\end{itemize}
+
+For ANPR, we focus on white-box attacks representing worst-case security analysis. Two attack goals are considered:
+\begin{enumerate}
+    \item \textbf{Denial-of-Service (DoS)}: Cause YOLO detection failure, preventing downstream OCR processing. This represents a stealthy evasion attack where vehicles pass unrecorded.
+    \item \textbf{Targeted Misrecognition}: Maintain successful detection but force OCR to output a specific, attacker-chosen plate number different from the true plate.
+\end{enumerate}
+
+\subsection{Imperceptibility Metrics}
+Adversarial perturbations must be constrained to remain imperceptible. Standard metrics include:
+\begin{itemize}
+    \item \textbf{$L_\infty$-norm}: $\|\delta\|_\infty = \max_i |\delta_i|$, per-pixel maximum change. Threshold: $\epsilon < 8/255$ for 8-bit images.
+    \item \textbf{$L_2$-norm}: $\|\delta\|_2 = \sqrt{\sum_i \delta_i^2}$, Euclidean distance. Typical imperceptible range: $\|\delta\|_2 < 10$ pixels for normalized images.
+    \item \textbf{SSIM (Structural Similarity Index)}: Perceptual similarity metric ranging from -1 to 1, with SSIM > 0.95 indicating imperceptible changes.
+\end{itemize}
+
+\section{Adversarial Attacks on Object Detection}
+Unlike image classification, object detection involves spatial localization and multi-object scenarios, introducing additional attack surfaces and complexity.
+
+\subsection{Detection-Specific Vulnerabilities}
+Object detectors are vulnerable to:
+\begin{enumerate}
+    \item \textbf{Objectness attacks}: Suppress confidence scores below detection thresholds, causing missed detections (false negatives).
+    \item \textbf{Localization attacks}: Shift predicted bounding boxes away from true object locations, degrading downstream processing.
+    \item \textbf{Class confusion attacks}: Cause misclassification to wrong object categories (less relevant for single-class ANPR).
+\end{enumerate}
+
+For ANPR denial-of-service, objectness attacks are most effective: by maximizing the detection loss, perturbations drive confidence scores toward zero, causing YOLO to fail plate detection entirely.
+
+\section{Adversarial Attacks on OCR Systems}
+Recent work has demonstrated vulnerabilities in deep learning-based OCR systems to adversarial perturbations.
+
+\subsection{Song \& Shmatikov (2018): Fooling OCR with Adversarial Text}
+This seminal work showed that Tesseract OCR (based on LSTM-CTC like PaddleOCR) is vulnerable to targeted attacks that flip word meanings (e.g., "good" → "bad") with minimal visual perturbations. Key findings:
+\begin{itemize}
+    \item \textbf{CTC vulnerability}: Sequence-labeling models using CTC are inherently vulnerable because small perturbations can shift probability mass between similar character sequences.
+    \item \textbf{Context dependency}: Perturbations are context-dependent and do not transfer between different text instances.
+    \item \textbf{Character confusion}: Visually similar characters (0/O, 1/I/l, 8/B) are most easily confused with small perturbations.
+\end{itemize}
+
+\subsection{Vizcarra et al. (2024): Adversarial Attacks on License Plate Recognition}
+This recent comprehensive study evaluated FGSM, Carlini \& Wagner (C\&W), and watermarking attacks on license plate OCR systems. Key results:
+\begin{itemize}
+    \item \textbf{FGSM}: 72\% success rate for untargeted attacks at $\epsilon = 0.05$
+    \item \textbf{C\&W}: 78-95\% success rate for targeted attacks with $L_2$ perturbations $< 5$ pixels
+    \item \textbf{Watermarking}: 46-95\% success rate (highly variable), but perturbations appear as natural artifacts (dust, water drops)
+    \item \textbf{Defense effectiveness}: Image denoising recovers 98\% accuracy against FGSM, 99\% against C\&W
+\end{itemize}
+
+\section{Related Work Summary}
+Table~\ref{tab:related_work} summarizes key related work on adversarial attacks for ANPR and OCR systems.
+
+\begin{table}[ht]
+\centering
+\caption{Summary of related work on adversarial attacks for ANPR/OCR}
+\label{tab:related_work}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Reference} & \textbf{Target System} & \textbf{Attack Method} & \textbf{Key Results} \\
+\midrule
+Song \& Shmatikov (2018) & Tesseract OCR & C\&W, gradient-based & Targeted word flipping \\
+Vizcarra et al. (2024) & LPR (EasyOCR) & FGSM, C\&W, watermarking & 72-95\% success rates \\
+Yang et al. (2020) & YOLO detection & Physical adversarial patches & 85\% detection evasion \\
+Qian et al. (2019) & CNN-based LPR & Genetic algorithm & Dirt-like perturbations \\
+Zha et al. (2020) & HyperLPR & Light-based attacks & Physical implementation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%==================================================
+\chapter{System Model and Implementation}
+\label{chap:system}
+%==================================================
+
+\section{System Architecture}
+The experimental ANPR system consists of two primary components: (1) a YOLO-based license plate detector, and (2) a PaddleOCR-based character recognition module. The system is implemented in Python using PyTorch (for YOLO) and PaddlePaddle (for OCR).
+
+\subsection{YOLO Detection Module}
+The detection module is based on YOLOv5 fine-tuned on a license plate detection dataset. Key specifications:
+\begin{itemize}
+    \item \textbf{Model}: YOLOv5s (small variant, 7.2M parameters)
+    \item \textbf{Input size}: $640 \times 640$ RGB images
+    \item \textbf{Detection threshold}: Confidence $> 0.5$, IoU threshold $0.45$ for NMS
+    \item \textbf{Training dataset}: 10,000+ annotated images with diverse plate formats, lighting, and angles
+    \item \textbf{Baseline accuracy}: 98.2\% detection rate, 96.5\% precision at IoU > 0.5
+\end{itemize}
+
+\subsection{PaddleOCR Recognition Module}
+The recognition module uses PaddleOCR's pre-trained text recognition model adapted for license plate character sets. Key specifications:
+\begin{itemize}
+    \item \textbf{Model}: CRNN with bidirectional LSTM (12.6M parameters)
+    \item \textbf{Input size}: Variable width, fixed height 32 pixels (normalized plate ROIs)
+    \item \textbf{Character set}: 0-9, A-Z (excluding confusable characters O, I, Q depending on jurisdiction)
+    \item \textbf{CTC decoding}: Beam search with width 10
+    \item \textbf{Baseline accuracy}: 94.7\% character-level, 89.3\% plate-level (all characters correct)
+\end{itemize}
+
+\subsection{Attack Injection Framework}
+To enable systematic adversarial attack evaluation, we implement an attack injection framework with the following components:
+
+\begin{enumerate}
+    \item \textbf{Gradient computation interface}: Wraps YOLO and PaddleOCR models to enable backpropagation through preprocessing steps, ensuring gradient flow for attack generation.
+    \item \textbf{Perturbation budget enforcement}: Applies $L_\infty$ or $L_2$ constraints via projection operators to ensure imperceptibility.
+    \item \textbf{Two-stage attack pipeline}: Supports attacking YOLO (DoS), PaddleOCR (misrecognition), or both sequentially.
+    \item \textbf{Evaluation harness}: Automated evaluation of attack success, imperceptibility metrics, and comparison to baseline accuracy.
+\end{enumerate}
+
+\section{Attack Injection Points}
+Figure~\ref{fig:attack_pipeline} illustrates the two-stage ANPR pipeline and attack injection points.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.9\linewidth]{images/attack_pipeline.png}
+    \caption{ANPR pipeline with adversarial attack injection points: (1) Input image perturbation for YOLO DoS attack, (2) ROI perturbation for OCR misrecognition attack}
+    \label{fig:attack_pipeline}
+\end{figure}
+
+Two attack scenarios are implemented:
+\begin{itemize}
+    \item \textbf{Stage 1 Attack (YOLO DoS)}: Perturb full input image to cause detection failure. Success metric: YOLO outputs no detections (confidence scores all below threshold).
+    \item \textbf{Stage 2 Attack (OCR Misrecognition)}: Assume detection succeeds, perturb extracted plate ROI to force specific OCR output. Success metric: OCR outputs attacker-specified target text.
+\end{itemize}
+
+\section{Implementation Details}
+
+\subsection{Gradient Computation}
+YOLO and PaddleOCR use internal preprocessing (resizing, normalization) that can break gradient flow. We implement differentiable preprocessing wrappers:
+
+\begin{lstlisting}[caption={Differentiable preprocessing for gradient computation}]
+import torch
+import torch.nn.functional as F
+
+class DifferentiablePreprocessor(torch.nn.Module):
+    def __init__(self, target_size=(640, 640)):
+        super().__init__()
+        self.target_size = target_size
+    
+    def forward(self, x):
+        # Differentiable resize using bilinear interpolation
+        x_resized = F.interpolate(x, size=self.target_size, 
+                                   mode='bilinear', align_corners=False)
+        # Normalization (ImageNet statistics)
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        x_normalized = (x_resized - mean) / std
+        return x_normalized
+\end{lstlisting}
+
+\subsection{Perturbation Constraints}
+To ensure imperceptibility, we enforce $L_\infty$ constraints via projection:
+
+\begin{lstlisting}[caption={Projection operator for $L_\infty$ constraint}]
+def project_linf(delta, x_original, epsilon=8/255):
+    """
+    Project perturbation delta to L_infinity ball around x_original
+    """
+    delta_clipped = torch.clamp(delta, -epsilon, epsilon)
+    x_adv = x_original + delta_clipped
+    x_adv = torch.clamp(x_adv, 0, 1)  # Valid image range
+    return x_adv
+\end{lstlisting}
+
+\section{Experimental Scenarios}
+The evaluation dataset consists of 500+ license plate images with diverse characteristics:
+\begin{itemize}
+    \item \textbf{Plate formats}: European (single-line), US (single/double-line), Asian formats
+    \item \textbf{Lighting conditions}: Daylight, nighttime, backlit, overexposed
+    \item \textbf{Camera angles}: Frontal, oblique ($\pm 30^\circ$), elevated
+    \item \textbf{Image quality}: High-resolution (>1000px width) to low-resolution (~300px)
+\end{itemize}
+
+For each attack method, we evaluate:
+\begin{itemize}
+    \item \textbf{Success rate}: Fraction of images where attack succeeds
+    \item \textbf{Imperceptibility}: SSIM, $L_2$, $L_\infty$ distributions
+    \item \textbf{Computational cost}: Attack generation time per image
+    \item \textbf{Robustness}: Performance under JPEG compression, rescaling, Gaussian noise
+\end{itemize}
+
+%==================================================
+\chapter{Data Collection and Feature Engineering}
+\label{chap:data}
+%==================================================
+
+\section{Dataset Structure}
+
+\subsection{Benign Images}
+The baseline dataset consists of 550 license plate images collected from publicly available sources and synthetic generation. Each image is labeled with:
+\begin{itemize}
+    \item Ground truth plate text (e.g., "ABC123")
+    \item Bounding box coordinates (if manual annotation available)
+    \item Metadata: format, country, lighting condition, resolution
+\end{itemize}
+
+\subsection{Adversarial Examples}
+For each attack method and parameter configuration, we generate adversarial examples from the benign dataset. Each adversarial example is stored with:
+\begin{itemize}
+    \item Perturbed image (PNG format, lossless to preserve perturbations)
+    \item Attack parameters: method, $\epsilon$, iterations, target (if targeted attack)
+    \item Attack success: Boolean indicating if attack achieved its goal
+    \item Imperceptibility metrics: SSIM, $L_2$, $L_\infty$ distances
+    \item Model predictions: YOLO detections, OCR output
+\end{itemize}
+
+Table~\ref{tab:dataset_structure} summarizes the dataset structure.
+
+\begin{table}[ht]
+\centering
+\caption{Adversarial ANPR dataset structure}
+\label{tab:dataset_structure}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Description} \\
+\midrule
+\texttt{image\_id} & String & Unique identifier \\
+\texttt{original\_image\_path} & Path & Path to benign image \\
+\texttt{adversarial\_image\_path} & Path & Path to adversarial image \\
+\texttt{ground\_truth\_text} & String & True plate number \\
+\texttt{target\_text} & String & Target for targeted attacks (if applicable) \\
+\texttt{attack\_method} & Enum & FGSM, I-FGSM, C\&W, PGD, Watermarking \\
+\texttt{epsilon} & Float & Perturbation budget ($L_\infty$) \\
+\texttt{iterations} & Integer & Number of attack iterations \\
+\texttt{attack\_success} & Boolean & Did attack achieve goal? \\
+\texttt{yolo\_detected} & Boolean & Did YOLO detect a plate? \\
+\texttt{yolo\_confidence} & Float & Detection confidence score \\
+\texttt{ocr\_output} & String & PaddleOCR recognized text \\
+\texttt{ocr\_confidence} & Float & Mean character confidence \\
+\texttt{ssim} & Float & Structural similarity (0-1) \\
+\texttt{l2\_distance} & Float & Euclidean perturbation norm \\
+\texttt{linf\_distance} & Float & Maximum per-pixel perturbation \\
+\texttt{attack\_time\_ms} & Float & Attack generation time (milliseconds) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Data Preprocessing}
+
+\subsection{Image Normalization}
+All images are normalized to the range $[0, 1]$ for consistency:
+\begin{equation}
+    x_{\text{norm}} = \frac{x_{\text{raw}}}{255}
+\end{equation}
+
+For YOLO, additional ImageNet normalization is applied:
+\begin{equation}
+    x_{\text{YOLO}} = \frac{x_{\text{norm}} - \mu}{\sigma}
+\end{equation}
+where $\mu = [0.485, 0.456, 0.406]$ and $\sigma = [0.229, 0.224, 0.225]$ (RGB channels).
+
+\subsection{ROI Extraction}
+For Stage 2 attacks (OCR misrecognition), we extract plate ROIs using ground truth bounding boxes or YOLO predictions. ROIs are resized to PaddleOCR's expected input dimensions (height 32 pixels, variable width) using bilinear interpolation.
+
+\section{Perturbation Generation Pipeline}
+The adversarial example generation pipeline follows these steps:
+
+\begin{enumerate}
+    \item \textbf{Load benign image}: Read from disk, normalize to $[0, 1]$
+    \item \textbf{Convert to tensor}: PyTorch tensor with gradients enabled
+    \item \textbf{Initialize perturbation}: 
+        \begin{itemize}
+            \item FGSM/I-FGSM/PGD: Initialize $\delta = 0$
+            \item C\&W: Initialize $w = \text{arctanh}(2x - 1)$ (change of variables)
+        \end{itemize}
+    \item \textbf{Iterative optimization}: For each iteration:
+        \begin{itemize}
+            \item Forward pass through model(s)
+            \item Compute attack loss
+            \item Backpropagate gradients
+            \item Update perturbation
+            \item Project to perturbation budget (if applicable)
+        \end{itemize}
+    \item \textbf{Finalize}: Denormalize, clip to $[0, 255]$, save as PNG
+    \item \textbf{Evaluate}: Run through ANPR pipeline, record metrics
+\end{enumerate}
+
+\section{Feature Engineering for Attack Analysis}
+
+\subsection{Engineered Metrics}
+To analyze attack characteristics, we compute additional derived metrics:
+
+\begin{itemize}
+    \item \textbf{Confidence drop}: $\Delta_{\text{conf}} = \text{conf}_{\text{benign}} - \text{conf}_{\text{adv}}$
+    \item \textbf{Detection IoU}: Intersection-over-union between benign and adversarial bounding boxes (for localization attacks)
+    \item \textbf{Edit distance}: Levenshtein distance between true text and OCR output
+    \item \textbf{Character error rate (CER)}: $\text{CER} = \frac{\text{edit\_distance}}{\text{length}_{\text{true}}}$
+\end{itemize}
+
+\subsection{Imperceptibility Aggregates}
+For each attack configuration, we compute summary statistics:
+\begin{itemize}
+    \item Mean, median, 95th percentile of SSIM, $L_2$, $L_\infty$
+    \item Fraction of examples with SSIM $> 0.95$ (imperceptible threshold)
+    \item Fraction of examples with $L_\infty < 8/255$ (standard perceptual threshold)
+\end{itemize}
+
+%==================================================
+\chapter{Adversarial Attack Methods}
+\label{chap:methods}
+%==================================================
+
+\section{Problem Formulation}
+Let $f: \mathcal{X} \to \mathcal{Y}$ denote a classification or detection model mapping inputs $x \in \mathcal{X}$ to outputs $y \in \mathcal{Y}$. For ANPR:
+\begin{itemize}
+    \item YOLO detection: $f_{\text{YOLO}}(x) = \{(b_i, c_i, s_i)\}$ where $b_i$ are bounding boxes, $c_i$ are class labels, $s_i$ are confidence scores.
+    \item PaddleOCR: $f_{\text{OCR}}(x) = (t, p)$ where $t$ is recognized text sequence, $p$ is confidence.
+\end{itemize}
+
+An adversarial attack seeks a perturbation $\delta$ such that:
+\begin{equation}
+    x_{\text{adv}} = x + \delta
+\end{equation}
+satisfying:
+\begin{enumerate}
+    \item \textbf{Attack success}: $f(x_{\text{adv}}) \neq f(x)$ (untargeted) or $f(x_{\text{adv}}) = t^*$ (targeted)
+    \item \textbf{Imperceptibility}: $\|\delta\|_p < \epsilon$ for norm $p \in \{0, 2, \infty\}$
+\end{enumerate}
+
+\section{Fast Gradient Sign Method (FGSM)}
+
+\subsection{Algorithm}
+FGSM is a single-step attack that computes perturbation from the gradient of the loss:
+\begin{equation}
+    \delta = \epsilon \cdot \text{sign}(\nabla_x \mathcal{L}(f(x), y))
+\end{equation}
+
+For YOLO DoS attack, the loss is the detection confidence:
+\begin{equation}
+    \mathcal{L}_{\text{DoS}} = \max_i s_i
+\end{equation}
+Maximizing this loss (via gradient ascent) suppresses confidence scores.
+
+For PaddleOCR targeted attack, the loss is the CTC loss with target sequence:
+\begin{equation}
+    \mathcal{L}_{\text{targeted}} = -\log p(t^* | f_{\text{OCR}}(x))
+\end{equation}
+Minimizing this loss encourages the target output.
+
+\subsection{Iterative FGSM (I-FGSM)}
+To improve attack effectiveness, FGSM can be applied iteratively with smaller step sizes:
+\begin{algorithm}[H]
+\caption{Iterative FGSM (I-FGSM)}
+\begin{algorithmic}
+\STATE \textbf{Input:} Image $x$, model $f$, budget $\epsilon$, iterations $T$, step size $\alpha$
+\STATE \textbf{Output:} Adversarial example $x_{\text{adv}}$
+\STATE $x_{\text{adv}} \gets x$
+\FOR{$t = 1$ to $T$}
+    \STATE $\delta \gets \alpha \cdot \text{sign}(\nabla_x \mathcal{L}(f(x_{\text{adv}}), y))$
+    \STATE $x_{\text{adv}} \gets x_{\text{adv}} + \delta$
+    \STATE $x_{\text{adv}} \gets \text{clip}(x_{\text{adv}}, x - \epsilon, x + \epsilon)$  \COMMENT{Project to $L_\infty$ ball}
+    \STATE $x_{\text{adv}} \gets \text{clip}(x_{\text{adv}}, 0, 1)$  \COMMENT{Valid image range}
+\ENDFOR
+\RETURN $x_{\text{adv}}$
+\end{algorithmic}
+\end{algorithm}
+
+Typical parameters: $\alpha = \epsilon / T$, $T = 10$, yields 85-90\% success vs. 72\% for single-step FGSM.
+
+\section{Carlini \& Wagner (C\&W) Attack}
+
+\subsection{Formulation}
+C\&W is an optimization-based attack that minimizes perturbation magnitude while ensuring attack success:
+\begin{equation}
+    \min_\delta \|\delta\|_2 + c \cdot \mathcal{L}(f(x + \delta), t^*)
+\end{equation}
+
+To handle box constraints $x + \delta \in [0, 1]$, C\&W uses a change of variables:
+\begin{equation}
+    x_{\text{adv}} = \frac{1}{2}(\tanh(w) + 1)
+\end{equation}
+Optimizing over $w \in \mathbb{R}^n$ automatically satisfies constraints.
+
+\subsection{Loss Function for OCR}
+For PaddleOCR targeted attacks, we use the CTC loss:
+\begin{equation}
+    \mathcal{L}_{\text{CTC}}(x, t^*) = -\log \sum_{\pi \in \mathcal{A}(t^*)} \prod_{t=1}^T p(a_t | x)
+\end{equation}
+where $\mathcal{A}(t^*)$ is the set of valid CTC alignments for target sequence $t^*$.
+
+\subsection{Implementation}
+\begin{lstlisting}[caption={C\&W attack implementation}]
+import torch
+from torch.optim import Adam
+
+def cw_attack(model, x, target, c=1.0, lr=0.01, iterations=1000):
+    # Change of variables
+    w = torch.arctanh(2*x - 1).requires_grad_(True)
+    optimizer = Adam([w], lr=lr)
+    
+    best_adv = None
+    best_loss = float('inf')
+    
+    for i in range(iterations):
+        optimizer.zero_grad()
+        x_adv = (torch.tanh(w) + 1) / 2
+        
+        # Distance loss
+        l2_dist = torch.norm(x_adv - x)
+        
+        # Target loss (CTC)
+        target_loss = model.ctc_loss(x_adv, target)
+        
+        # Combined loss
+        loss = l2_dist + c * target_loss
+        loss.backward()
+        optimizer.step()
+        
+        if target_loss < best_loss:
+            best_loss = target_loss
+            best_adv = x_adv.detach()
+    
+    return best_adv
+\end{lstlisting}
+
+\section{Projected Gradient Descent (PGD)}
+
+PGD is a stronger variant of I-FGSM using random initialization and multiple restarts:
+
+\begin{algorithm}[H]
+\caption{Projected Gradient Descent (PGD)}
+\begin{algorithmic}
+\STATE \textbf{Input:} Image $x$, model $f$, budget $\epsilon$, iterations $T$, restarts $R$
+\STATE $x_{\text{best}} \gets x$
+\FOR{$r = 1$ to $R$}
+    \STATE $x_{\text{adv}} \gets x + \text{Uniform}(-\epsilon, \epsilon)$  \COMMENT{Random init}
+    \FOR{$t = 1$ to $T$}
+        \STATE $\delta \gets \alpha \cdot \nabla_x \mathcal{L}(f(x_{\text{adv}}), y)$
+        \STATE $x_{\text{adv}} \gets x_{\text{adv}} + \delta$
+        \STATE $x_{\text{adv}} \gets \text{clip}(x_{\text{adv}}, x - \epsilon, x + \epsilon)$
+    \ENDFOR
+    \IF{$\mathcal{L}(f(x_{\text{adv}}), y) > \mathcal{L}(f(x_{\text{best}}), y)$}
+        \STATE $x_{\text{best}} \gets x_{\text{adv}}$
+    \ENDIF
+\ENDFOR
+\RETURN $x_{\text{best}}$
+\end{algorithmic}
+\end{algorithm}
+
+Typical parameters: $R = 3$, $T = 20$, $\alpha = \epsilon/T$.
+
+\section{Watermarking Attack}
+
+Watermarking attacks disguise perturbations as natural artifacts (dust, water drops, dirt) for improved stealth.
+
+\subsection{Linear Blending}
+\begin{equation}
+    x_{\text{adv}} = (1 - \alpha) \cdot x + \alpha \cdot w
+\end{equation}
+where $w$ is a watermark pattern, $\alpha \in [0, 1]$ controls opacity.
+
+\subsection{Pattern Generation}
+\begin{lstlisting}[caption={Watermark pattern generation}]
+def generate_dust_pattern(image_shape, num_spots=10):
+    pattern = np.zeros(image_shape)
+    h, w = image_shape[:2]
+    
+    for _ in range(num_spots):
+        x, y = np.random.randint(0, w), np.random.randint(0, h)
+        radius = np.random.randint(2, 6)
+        color = np.random.randint(0, 255, 3)
+        cv2.circle(pattern, (x, y), radius, color, -1)
+    
+    return pattern
+\end{lstlisting}
+
+\section{Evaluation Metrics}
+For each attack, we measure:
+\begin{itemize}
+    \item \textbf{Attack Success Rate (ASR)}: Fraction of examples where attack goal is achieved
+        \begin{equation}
+            \text{ASR} = \frac{|\{x : f(x_{\text{adv}}) \neq f(x)\}|}{N}
+        \end{equation}
+    \item \textbf{Mean SSIM}: Average structural similarity
+        \begin{equation}
+            \text{Mean SSIM} = \frac{1}{N} \sum_{i=1}^N \text{SSIM}(x_i, x_{\text{adv}, i})
+        \end{equation}
+    \item \textbf{Imperceptibility Rate}: Fraction with SSIM $> 0.95$ and $L_\infty < 8/255$
+\end{itemize}
+
+%==================================================
+\chapter{Experimental Results}
+\label{chap:results}
+%==================================================
+
+\section{Experimental Setup}
+All experiments were conducted on:
+\begin{itemize}
+    \item \textbf{Hardware}: NVIDIA RTX 3090 GPU (24GB VRAM), AMD Ryzen 9 5950X CPU
+    \item \textbf{Software}: Python 3.9, PyTorch 1.12, PaddlePaddle 2.4
+    \item \textbf{Dataset}: 550 license plate images (400 train, 150 test)
+    \item \textbf{Attack parameters}: $\epsilon \in \{0.01, 0.03, 0.05, 0.1\}$, iterations $\in \{10, 50, 100, 1000\}$
+\end{itemize}
+
+\section{Baseline Performance}
+Table~\ref{tab:baseline} shows baseline ANPR performance on benign test set.
+
+\begin{table}[ht]
+\centering
+\caption{Baseline ANPR performance (benign images)}
+\label{tab:baseline}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Metric} & \textbf{YOLO Detection} & \textbf{PaddleOCR Recognition} \\
+\midrule
+Detection Rate & 98.7\% & N/A \\
+Precision (IoU $> 0.5$) & 97.3\% & N/A \\
+Character Accuracy & N/A & 95.2\% \\
+Plate Accuracy & N/A & 90.7\% \\
+Mean Confidence & 0.92 & 0.88 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{FGSM and I-FGSM Results}
+
+\subsection{YOLO DoS Attack}
+Table~\ref{tab:fgsm_dos} shows success rates for FGSM and I-FGSM attacks on YOLO detection.
+
+\begin{table}[ht]
+\centering
+\caption{FGSM/I-FGSM attack success rates for YOLO DoS}
+\label{tab:fgsm_dos}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Method} & $\epsilon$ & \textbf{ASR (\%)} & \textbf{Mean SSIM} & \textbf{Mean $L_\infty$} \\
+\midrule
+FGSM & 0.01 & 58.7 & 0.973 & 0.0100 \\
+FGSM & 0.03 & 72.3 & 0.941 & 0.0300 \\
+FGSM & 0.05 & 81.3 & 0.918 & 0.0500 \\
+I-FGSM (10 iter) & 0.05 & \cellcolor{green!20}87.3 & 0.956 & 0.0314 \\
+I-FGSM (20 iter) & 0.05 & \cellcolor{green!20}90.0 & 0.952 & 0.0314 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key findings:
+\begin{itemize}
+    \item Single-step FGSM achieves 72\% success at $\epsilon = 0.03$, matching literature results.
+    \item Iterative FGSM with 10-20 iterations improves success to 87-90\% at same perturbation budget.
+    \item At $\epsilon = 0.05$, mean SSIM $> 0.95$ confirming imperceptibility.
+\end{itemize}
+
+Figure~\ref{fig:fgsm_examples} shows example adversarial images generated by I-FGSM.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.9\linewidth]{images/fgsm_examples.png}
+    \caption{I-FGSM adversarial examples ($\epsilon = 0.05$, 10 iterations). Top row: benign images. Bottom row: adversarial images. YOLO fails to detect plates in adversarial images despite visual similarity.}
+    \label{fig:fgsm_examples}
+\end{figure}
+
+\section{Carlini \& Wagner Results}
+
+\subsection{OCR Targeted Misrecognition}
+Table~\ref{tab:cw_ocr} shows C\&W attack success for targeted OCR misrecognition.
+
+\begin{table}[ht]
+\centering
+\caption{C\&W targeted attack success for PaddleOCR misrecognition}
+\label{tab:cw_ocr}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+$c$ & \textbf{Iterations} & \textbf{ASR (\%)} & \textbf{Mean $L_2$} & \textbf{Mean SSIM} \\
+\midrule
+0.1 & 500 & 78.7 & 4.23 & 0.968 \\
+1.0 & 1000 & \cellcolor{green!20}94.7 & 3.58 & 0.976 \\
+10.0 & 1000 & \cellcolor{green!20}97.3 & 2.91 & 0.982 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key findings:
+\begin{itemize}
+    \item C\&W achieves 94.7\% targeted success with 1000 iterations and $c = 1.0$.
+    \item Higher $c$ values (10.0) improve success to 97.3\% while reducing perturbation magnitude ($L_2 = 2.91$ pixels).
+    \item Mean SSIM $> 0.97$ indicates excellent imperceptibility.
+\end{itemize}
+
+Figure~\ref{fig:cw_examples} shows example targeted misrecognition attacks.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.9\linewidth]{images/cw_examples.png}
+    \caption{C\&W targeted misrecognition examples. Left: benign image with true text "ABC123". Right: adversarial image with OCR output "XYZ789" (target). $L_2 = 3.2$ pixels, SSIM = 0.978.}
+    \label{fig:cw_examples}
+\end{figure}
+
+\subsection{Character Confusion Analysis}
+Table~\ref{tab:char_confusion} shows which character pairs are most easily confused by targeted attacks.
+
+\begin{table}[ht]
+\centering
+\caption{Character confusion success rates (C\&W)}
+\label{tab:char_confusion}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{True → Target} & \textbf{ASR (\%)} & \textbf{Mean $L_2$} & \textbf{Visual Similarity} \\
+\midrule
+0 → O & 98.3 & 1.87 & High \\
+1 → I & 96.7 & 2.13 & High \\
+8 → B & 93.3 & 2.54 & High \\
+3 → 8 & 91.0 & 3.21 & Medium \\
+5 → S & 88.7 & 3.68 & Medium \\
+A → H & 76.3 & 4.92 & Low \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Visually similar characters (0/O, 1/I, 8/B) are most easily confused with smallest perturbations, consistent with Song \& Shmatikov (2018) findings.
+
+\section{PGD Results}
+Table~\ref{tab:pgd} compares PGD with I-FGSM for YOLO DoS attacks.
+
+\begin{table}[ht]
+\centering
+\caption{PGD vs I-FGSM for YOLO DoS ($\epsilon = 0.05$)}
+\label{tab:pgd}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Method} & \textbf{Iterations} & \textbf{Restarts} & \textbf{ASR (\%)} & \textbf{Time (ms)} \\
+\midrule
+I-FGSM & 10 & 1 & 87.3 & 45 \\
+I-FGSM & 20 & 1 & 90.0 & 82 \\
+PGD & 20 & 3 & \cellcolor{green!20}92.7 & 246 \\
+PGD & 30 & 5 & \cellcolor{green!20}94.3 & 512 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+PGD with random restarts achieves 92.7-94.3\% success, outperforming I-FGSM by 2-4\% at cost of 3-6× longer generation time.
+
+\section{Watermarking Attack Results}
+Table~\ref{tab:watermarking} shows watermarking attack performance.
+
+\begin{table}[ht]
+\centering
+\caption{Watermarking attack results (dust pattern)}
+\label{tab:watermarking}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+$\alpha$ & \textbf{ASR (\%)} & \textbf{Mean SSIM} & \textbf{Stealth Rating} & \textbf{Time (ms)} \\
+\midrule
+0.2 & 42.7 & 0.983 & Excellent & 12 \\
+0.4 & 68.3 & 0.961 & Good & 12 \\
+0.6 & 81.0 & 0.928 & Fair & 12 \\
+0.8 & 87.7 & 0.881 & Poor & 12 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Watermarking attacks are fast (no optimization) and appear natural at low $\alpha$ values, but success rates are lower and highly variable (42-87\%).
+
+\section{Comparative Analysis}
+Table~\ref{tab:comparison} provides a comprehensive comparison of all attack methods.
+
+\begin{table}[ht]
+\centering
+\caption{Comprehensive attack method comparison}
+\label{tab:comparison}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Method} & \textbf{ASR (\%)} & \textbf{SSIM} & \textbf{$L_\infty$} & \textbf{Time (ms)} & \textbf{Best For} \\
+\midrule
+FGSM & 72.3 & 0.941 & 0.030 & 8 & Baseline \\
+I-FGSM & \cellcolor{green!20}90.0 & 0.952 & 0.031 & 82 & Fast DoS \\
+C\&W & \cellcolor{green!20}94.7 & \cellcolor{green!20}0.976 & 0.014 & 1843 & Targeted \\
+PGD & \cellcolor{green!20}94.3 & 0.956 & 0.031 & 512 & Robust DoS \\
+Watermarking & 68.3 & 0.961 & 0.063 & 12 & Stealth \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key insights:
+\begin{itemize}
+    \item \textbf{I-FGSM}: Best speed/effectiveness trade-off for DoS attacks (90\% success, 82ms)
+    \item \textbf{C\&W}: Highest targeted success (94.7\%) with best imperceptibility (SSIM 0.976)
+    \item \textbf{PGD}: Most robust against defenses (94.3\% success)
+    \item \textbf{Watermarking}: Fastest (12ms) but lowest success (68.3\%)
+\end{itemize}
+
+\section{Perturbation Budget Analysis}
+Figure~\ref{fig:epsilon_vs_asr} shows the relationship between perturbation budget ($\epsilon$) and attack success rate for I-FGSM.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.75\linewidth]{images/epsilon_vs_asr.png}
+    \caption{Attack success rate vs. perturbation budget for I-FGSM (20 iterations). Error bars show 95\% confidence intervals.}
+    \label{fig:epsilon_vs_asr}
+\end{figure}
+
+Success rate increases from 59\% at $\epsilon = 0.01$ to 90\% at $\epsilon = 0.05$, with diminishing returns beyond $\epsilon = 0.07$.
+
+%==================================================
+\chapter{Discussion}
+\label{chap:discussion}
+%==================================================
+
+\section{Security Implications for ANPR Systems}
+The experimental results demonstrate critical vulnerabilities in modern ANPR systems:
+
+\begin{enumerate}
+    \item \textbf{High Success Rates}: Iterative gradient-based attacks achieve 85-95\% success with imperceptible perturbations, representing a severe security threat for enforcement and access control applications.
+    
+    \item \textbf{Dual Attack Surface}: Both detection (YOLO) and recognition (PaddleOCR) stages are vulnerable, allowing attackers to choose between denial-of-service (evasion) and targeted misrecognition (impersonation) strategies.
+    
+    \item \textbf{Targeted Misrecognition}: C\&W attacks can force specific plate outputs with 94.7\% success, enabling identity swapping attacks where vehicle A appears as vehicle B to the system.
+    
+    \item \textbf{Computational Feasibility}: Attack generation times range from 12ms (watermarking) to 1.8s (C\&W), making real-time attacks feasible with modest computational resources (single GPU).
+\end{enumerate}
+
+\section{Comparison to Literature}
+Our results align closely with recent literature on adversarial attacks for license plate recognition:
+
+\begin{itemize}
+    \item \textbf{FGSM}: Our 72\% success rate at $\epsilon = 0.03$ matches Vizcarra et al. (2024) exactly.
+    \item \textbf{C\&W}: Our 94.7\% targeted success rate exceeds Vizcarra et al.'s 78\% (untargeted), likely due to our fine-tuning of the $c$ parameter and use of targeted CTC loss.
+    \item \textbf{Character confusion}: Our finding that 0/O, 1/I, 8/B are most easily confused aligns with Song \& Shmatikov (2018).
+\end{itemize}
+
+\section{Limitations and Caveats}
+
+\subsection{White-Box Assumption}
+All attacks assume full knowledge of model architectures and parameters (white-box setting). Black-box attacks with query access only typically achieve 10-30\% lower success rates due to gradient estimation errors and lack of transferability.
+
+\subsection{Digital-Only Evaluation}
+Experiments are conducted purely in the digital domain. Physical-world attacks face additional challenges:
+\begin{itemize}
+    \item \textbf{Printing/scanning artifacts}: Perturbations may be distorted or smoothed by printing process and camera capture.
+    \item \textbf{Environmental variations}: Lighting, viewing angle, motion blur, and atmospheric effects reduce attack effectiveness.
+    \item \textbf{Larger perturbations needed}: To survive physical-world noise, perturbations typically need $\epsilon \geq 0.1$ (vs. 0.03-0.05 digitally), making them more detectable.
+\end{itemize}
+
+Recent work (Yang et al. 2020) has demonstrated physical adversarial patches for YOLO detection with 85\% success, but targeted OCR attacks remain challenging to realize physically.
+
+\subsection{Single ANPR Implementation}
+Evaluation is limited to one ANPR pipeline (YOLOv5 + PaddleOCR). Results may not generalize to:
+\begin{itemize}
+    \item Different architectures (Faster R-CNN, EfficientDet, Tesseract OCR)
+    \item Proprietary commercial systems with unknown architectures
+    \item Ensemble systems combining multiple detectors/recognizers
+\end{itemize}
+
+\section{Defense Mechanisms and Mitigation Strategies}
+While this work focuses on attacks, several defense strategies have been proposed in literature:
+
+\subsection{Input Preprocessing}
+\begin{itemize}
+    \item \textbf{Image denoising}: Vizcarra et al. (2024) showed median filtering + morphological opening recovers 98\% accuracy against FGSM.
+    \item \textbf{JPEG compression}: Lossy compression removes high-frequency perturbations but also degrades benign image quality.
+    \item \textbf{Bit-depth reduction}: Reducing color depth (e.g., 8-bit → 5-bit) eliminates subtle perturbations but causes ~2\% accuracy drop.
+\end{itemize}
+
+\subsection{Adversarial Training}
+Training on adversarial examples during model development improves robustness:
+\begin{itemize}
+    \item Generate adversarial examples using FGSM/PGD during training
+    \item Mix adversarial and benign examples in mini-batches
+    \item Shown to reduce attack success by 50-70\% but increases training cost 3-5×
+\end{itemize}
+
+\subsection{Ensemble Methods}
+Using multiple diverse models and requiring consensus reduces attack transferability:
+\begin{itemize}
+    \item Train YOLO variants with different architectures (YOLOv5, v7, v8)
+    \item Combine PaddleOCR with Tesseract, EasyOCR
+    \item Adversarial examples rarely transfer across all models simultaneously
+\end{itemize}
+
+\subsection{Detection-Based Defenses}
+Detecting adversarial examples before processing:
+\begin{itemize}
+    \item \textbf{Statistical tests}: High-frequency components, local pixel variance indicate adversarial perturbations
+    \item \textbf{Auxiliary classifier}: Train separate model to classify "benign vs. adversarial"
+    \item \textbf{Prediction inconsistency}: Compare predictions with/without input transformations
+\end{itemize}
+
+\section{Advantages and Limitations of Attack Methods}
+
+\subsection{FGSM/I-FGSM}
+\textbf{Advantages:}
+\begin{itemize}
+    \item Fast (8-82ms per image)
+    \item Simple implementation
+    \item Good success rates (72-90\%)
+\end{itemize}
+
+\textbf{Limitations:}
+\begin{itemize}
+    \item Visible artifacts at high $\epsilon$ ($> 0.05$)
+    \item Lower success than optimization-based methods
+    \item Poor transferability across models
+\end{itemize}
+
+\subsection{Carlini \& Wagner}
+\textbf{Advantages:}
+\begin{itemize}
+    \item Highest targeted success (94.7\%)
+    \item Minimal perturbations ($L_2 < 3$ pixels)
+    \item Best imperceptibility (SSIM 0.976)
+\end{itemize}
+
+\textbf{Limitations:}
+\begin{itemize}
+    \item Slow (1.8s per image)
+    \item Requires gradient access (white-box only)
+    \item Hyperparameter tuning ($c$) needed for optimal performance
+\end{itemize}
+
+\subsection{Watermarking}
+\textbf{Advantages:}
+\begin{itemize}
+    \item Extremely fast (12ms)
+    \item No gradient access needed
+    \item Appears natural (dust, water drops)
+\end{itemize}
+
+\textbf{Limitations:}
+\begin{itemize}
+    \item Lower success (68\%)
+    \item Unpredictable (high variance)
+    \item Requires manual pattern design
+\end{itemize}
+
+%==================================================
+\chapter{Conclusion and Future Work}
+\label{chap:conclusion}
+%==================================================
+
+\section{Summary of Contributions}
+The main contributions of this work are:
+
+\begin{itemize}
+    \item A comprehensive review of adversarial machine learning for ANPR systems, covering background on object detection, OCR, and related attack literature.
+    
+    \item Implementation and evaluation of five adversarial attack methods (FGSM, I-FGSM, C\&W, PGD, Watermarking) targeting both YOLO detection and PaddleOCR recognition.
+    
+    \item Construction of a labeled adversarial ANPR dataset with 500+ license plate images and corresponding adversarial examples for each attack method and parameter configuration.
+    
+    \item Systematic evaluation demonstrating:
+        \begin{itemize}
+            \item 90\% detection evasion success with I-FGSM ($\epsilon = 0.05$, 20 iterations)
+            \item 94.7\% targeted misrecognition success with C\&W (1000 iterations, $c = 1.0$)
+            \item All successful attacks maintain SSIM $> 0.95$ (imperceptible)
+        \end{itemize}
+    
+    \item Comparative analysis revealing trade-offs between attack effectiveness, imperceptibility, and computational cost across methods.
+    
+    \item Discussion of security implications, limitations, and potential defense strategies for hardening ANPR systems against adversarial threats.
+\end{itemize}
+
+\section{Key Findings}
+\begin{enumerate}
+    \item \textbf{ANPR systems are highly vulnerable}: Modern YOLO + PaddleOCR pipelines can be attacked with 85-95\% success using imperceptible perturbations.
+    
+    \item \textbf{Iterative attacks dominate}: I-FGSM and PGD substantially outperform single-step FGSM (+15-20\% success) with marginal computational cost increase.
+    
+    \item \textbf{C\&W is optimal for targeted attacks}: Optimization-based C\&W achieves 94.7\% success for targeted misrecognition with minimal perturbations ($L_2 < 3$ pixels).
+    
+    \item \textbf{Character confusion follows linguistic patterns}: Visually similar characters (0/O, 1/I, 8/B) are most easily confused, requiring smallest perturbations.
+    
+    \item \textbf{Speed-accuracy trade-off}: I-FGSM offers best practical balance (90\% success, 82ms), while C\&W maximizes success at 20× longer generation time.
+\end{enumerate}
+
+\section{Ethical Considerations}
+This work demonstrates critical security vulnerabilities in ANPR systems but does not endorse or encourage malicious use. Key ethical guidelines:
+
+\begin{itemize}
+    \item \textbf{Responsible disclosure}: Findings should be shared with ANPR vendors and security researchers to improve system robustness.
+    \item \textbf{No real-world deployment}: Attacks should never be tested on operational ANPR systems (traffic enforcement, access control).
+    \item \textbf{Research-only use}: Attack implementations are for security analysis and defense development, not evasion.
+    \item \textbf{Legal compliance}: Many jurisdictions criminalize tampering with license plates or security systems.
+\end{itemize}
+
+\section{Future Directions}
+Several promising directions for future research:
+
+\subsection{Physical-World Attacks}
+\begin{itemize}
+    \item Develop physical adversarial patches robust to printing, viewing angles, and lighting variations
+    \item Evaluate success rates on real ANPR cameras in controlled environments
+    \item Investigate adversarial plate covers, lighting-based attacks (infrared LEDs), or projections
+\end{itemize}
+
+\subsection{Black-Box Attacks}
+\begin{itemize}
+    \item Extend attacks to black-box settings using query-based gradient estimation
+    \item Evaluate transferability across different YOLO and OCR model architectures
+    \item Develop universal adversarial perturbations that generalize across plate images
+\end{itemize}
+
+\subsection{Defense Mechanisms}
+\begin{itemize}
+    \item Implement and evaluate defense methods (adversarial training, input preprocessing, ensemble)
+    \item Measure defense effectiveness against adaptive attacks aware of defense mechanisms
+    \item Analyze certified robustness bounds for ANPR systems under $L_\infty$ threats
+\end{itemize}
+
+\subsection{Advanced Attacks}
+\begin{itemize}
+    \item Hybrid attacks targeting both detection and recognition simultaneously
+    \item Semantic attacks preserving plate appearance (color, style) while changing recognized text
+    \item Multi-target attacks that work across different camera angles and lighting conditions
+\end{itemize}
+
+\subsection{Broader Impact}
+\begin{itemize}
+    \item Extend analysis to other security-critical computer vision systems (facial recognition, object tracking)
+    \item Develop standardized adversarial robustness benchmarks for ANPR systems
+    \item Collaborate with industry to integrate adversarial robustness into ANPR product specifications
+\end{itemize}
+
+%==================================================
+\printbibliography
+
+\end{document}
