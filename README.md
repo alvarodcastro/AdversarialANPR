@@ -246,36 +246,36 @@ Security & performance notes:
 ### Baseline vs. Adversarial Examples
 Side-by-side examples of original and perturbed frames used in experiments.
 
-![Original sample image](images/original_image_0.png)
+![Original sample image](technicalReport/images/original_image_0.png)
 
-![Adversarial sample image](images/adversarial_image_0.png)
+![Adversarial sample image](technicalReport/images/adversarial_image_0.png)
 
 ### Detection DoS (Noise-Based Perturbation)
 Illustration of the DoS-style perturbation that reduces or removes YOLO detections.
 
-![Detection DoS illustration](images/DoSAdversarial.png)
+![Detection DoS illustration](technicalReport/images/DoSAdversarial.png)
 
 ### Targeted Region Transfer
 Example of transferring a target plate’s ROI appearance into a source frame.
 
 
-![Target image](images/target_original.jpg)
+![Target image](technicalReport/images/target_original.jpg)
 
-![Targeted region transfer result](images/adv_region_transfer.png)
+![Targeted region transfer result](technicalReport/images/adv_region_transfer.png)
 
 ### Imperceptible OCR Attack (Localized, Edge-Weighted)
 Representative frames from the OCR-focused attack showing iterative loop.
 
-![OCR attack overview](images/OCR_attack.png)
+![OCR attack overview](technicalReport/images/OCR_attack.png)
 
-![Perturbed region](images/OCR_attack2.png)
+![Perturbed region](technicalReport/images/OCR_attack2.png)
 
-![Attack result](images/imagen.png)
+![Attack result](technicalReport/images/imagen.png)
 
 ### Threat Model Diagrams
 High-level diagrams of attacker position and capabilities in a networked ANPR setting.
 
-![](images/AdversarialML_attacker_machine.drawio.png)
+![](technicalReport/images/AdversarialML_attacker_machine.drawio.png)
 
-![Threat model for Black Box Scenario](images/AdversarialML_attacker_net.drawio.png)
+![Threat model for Black Box Scenario](technicalReport/images/AdversarialML_attacker_net.drawio.png)
 
