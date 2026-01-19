@@ -275,6 +275,8 @@ Representative frames from the OCR-focused attack showing iterative loop.
 
 ![Perturbed region](images/OCR_attack2.png)
 
+![Attack result](images/imagen.png)
+
 ### Threat Model Diagrams
 High-level diagrams of attacker position and capabilities in a networked ANPR setting.
 
@@ -282,9 +284,3 @@ High-level diagrams of attacker position and capabilities in a networked ANPR se
 
 ![Threat model for Black Box Scenario](images/AdversarialML_attacker_net.drawio.png)
 
-### Additional Assets
-Extra imagery produced during experiments and drafting.
-
-![Additional image](images/imagen.png)
-
-![Original reference image](images/original_image.jpg)
