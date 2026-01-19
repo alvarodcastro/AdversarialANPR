@@ -241,11 +241,6 @@ Security & performance notes:
 - Open-source contributors of Ultralytics, PaddleOCR, and the dataset authors.
 - The VS Code environment and tooling used to run and document experiments.
 
-## Paper & Figures
-This repository includes a paper draft and figures under the `` directory to visually illustrate the research results and methodology.
-
-- References: [references.bib](references.bib)
-
 ## Attack pipeline illustrations
 
 ### Baseline vs. Adversarial Examples
