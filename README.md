@@ -240,3 +240,51 @@ Security & performance notes:
 ## Acknowledgments
 - Open-source contributors of Ultralytics, PaddleOCR, and the dataset authors.
 - The VS Code environment and tooling used to run and document experiments.
+
+## Paper & Figures
+This repository includes a paper draft and figures under the `` directory to visually illustrate the research results and methodology.
+
+- References: [references.bib](references.bib)
+
+Below are key figures embedded directly from the Overleaf assets to make the README self-contained and illustrative.
+
+### Baseline vs. Adversarial Examples
+Side-by-side examples of original and perturbed frames used in experiments.
+
+![Original sample image](images/original_image_0.png)
+
+![Adversarial sample image](images/adversarial_image_0.png)
+
+### Detection DoS (Noise-Based Perturbation)
+Illustration of the DoS-style perturbation that reduces or removes YOLO detections.
+
+![Detection DoS illustration](images/DoSAdversarial.png)
+
+### Targeted Region Transfer
+Example of transferring a target plate’s ROI appearance into a source frame.
+
+
+![Target image](images/target_original.jpg)
+
+![Targeted region transfer result](images/adv_region_transfer.png)
+
+### Imperceptible OCR Attack (Localized, Edge-Weighted)
+Representative frames from the OCR-focused attack showing iterative loop.
+
+![OCR attack overview](images/OCR_attack.png)
+
+![Perturbed region](images/OCR_attack2.png)
+
+### Threat Model Diagrams
+High-level diagrams of attacker position and capabilities in a networked ANPR setting.
+
+![](images/AdversarialML_attacker_machine.drawio.png)
+
+![Threat model for Black Box Scenario](images/AdversarialML_attacker_net.drawio.png)
+
+### Additional Assets
+Extra imagery produced during experiments and drafting.
+
+![Additional image](images/imagen.png)
+
+![Original reference image](images/original_image.jpg)
