@@ -246,7 +246,7 @@ This repository includes a paper draft and figures under the `` directory to vis
 
 - References: [references.bib](references.bib)
 
-Below are key figures embedded directly from the Overleaf assets to make the README self-contained and illustrative.
+## Attack pipeline illustrations
 
 ### Baseline vs. Adversarial Examples
 Side-by-side examples of original and perturbed frames used in experiments.
