@@ -1,11 +1,53 @@
 # Adversarial ANPR (Automatic Number Plate Recognition)
 
-Research-oriented notebook exploring three adversarial attacks against a modern ANPR pipeline that combines object detection (YOLO) for license plate localization and OCR (PaddleOCR) for text extraction.
+<p align="center">
+  <a href="https://doi.org/10.5281/zenodo.18302845">
+    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.18302845.svg" alt="DOI: 10.5281/zenodo.18302845" />
+  </a>
+  <br/>
+  <span><em>Robustness of ANPR to localized, image-space adversarial perturbations</em></span>
+</p>
 
-This README summarizes the experimental setup, methods, evaluation procedure, and how to reproduce the results presented in the notebook.
+<p align="center">
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11-blue?logo=python" alt="Python 3.9 | 3.10 | 3.11" /></a>
+  <a href="https://jupyter.org/"><img src="https://img.shields.io/badge/Notebook-Jupyter-orange?logo=jupyter" alt="Jupyter Notebook" /></a>
+  <a href="https://docs.ultralytics.com/"><img src="https://img.shields.io/badge/Detector-YOLO-0A7CFF?logo=yolo" alt="YOLO Detector" /></a>
+  <a href="https://github.com/PaddlePaddle/PaddleOCR"><img src="https://img.shields.io/badge/OCR-PaddleOCR-0cc1a3" alt="PaddleOCR" /></a>
+  <a href="https://www.kaggle.com/datasets/unidpro/spain-license-plate-dataset"><img src="https://img.shields.io/badge/Kaggle-Spain%20LP%20Dataset-20BEFF?logo=kaggle&logoColor=white" alt="Kaggle: Spain License Plate Dataset" /></a>
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
+</p>
+
+<p align="center">
+  <img src="technicalReport/images/DoSAdversarial.png" alt="Adversarial DoS illustration" width="760" />
+</p>
+
+Research notebook accompanying a broader research effort on the robustness of modern ANPR systems to image-space adversarial perturbations. The pipeline combines YOLO-based license plate detection with PaddleOCR-based text recognition, and evaluates three attack possibilities.
+
+
+## Table of Contents
+- Overview
+- Environment & Setup
+- Data
+- Models
+- Baseline Evaluation
+- Attacks
+  - Detection DoS
+  - Targeted Region Transfer
+  - Imperceptible OCR Attack
+- Metrics & Reporting
+- Reproducibility Notes
+- How to Run
+- Ethical Use
+- CPS Integration (MITM Threat Model)
+- MQTT Transport Variant
+- Technical Report
+- Results Gallery (Figures)
+- References
+- Acknowledgments
+- How to Cite
 
 ## Overview
-- Goal: Evaluate robustness of ANPR to image-space adversarial perturbations that (a) break plate detection or (b) alter OCR output, while keeping perturbations localized and visually subtle when possible.
+- Goal: Evaluate robustness of ANPR system to image-space adversarial perturbations that (a) break plate detection or (b) alter OCR output, while keeping perturbations localized and visually subtle when possible.
 - Pipeline:
   1. YOLO detector for plate localization (bounding boxes + confidence).
   2. PaddleOCR for text recognition within detected plate regions.
@@ -22,6 +64,13 @@ This README summarizes the experimental setup, methods, evaluation procedure, an
 - Kaggle access: The notebook uses `kagglehub` to download the dataset.
   - Ensure you have a Kaggle account and have accepted the dataset terms.
   - Configure Kaggle API credentials (KAGGLE_USERNAME / KAGGLE_KEY) or sign in as required by kagglehub.
+
+## Repository Structure
+- Root notebook: [adversarial_ANPR.ipynb](adversarial_ANPR.ipynb)
+- Project README: [README.md](README.md)
+- Dependencies: [requirements.txt](requirements.txt)
+- Technical report: [technicalReport/Adversarial_Machine_Learning_for_ANPR.pdf](technicalReport/Adversarial_Machine_Learning_for_ANPR.pdf)
+- Figures: [technicalReport/images](technicalReport/images)
 
 ## Data
 - Dataset: Spain License Plate Dataset from Kaggle
@@ -41,6 +90,15 @@ This README summarizes the experimental setup, methods, evaluation procedure, an
 
 ## Attacks
 
+### Threat Model Diagrams
+High-level diagrams of attacker position and capabilities in a networked ANPR setting.
+
+![Threat model for White Box Scenario](technicalReport/images/AdversarialML_attacker_machine.drawio.png)
+
+![Threat model for Black Box Scenario](technicalReport/images/AdversarialML_attacker_net.drawio.png)
+
+
+
 ### 1) Detection DoS (FGSM-inspired noise on pixels)
 - Function: `fgsm_attack_simple(model, image, epsilon, targeted_region=None)`
 - Idea: Add bounded, pixel-space perturbations (uniform random in this implementation) with magnitude `epsilon` (0–255 scale). Optionally restrict to the detected plate region (bbox) to localize changes.
@@ -52,6 +110,10 @@ This README summarizes the experimental setup, methods, evaluation procedure, an
   - Console summary (per-image results, drops, success rate).
   - Visualizations saved: `original_image_{i}.png`, `adversarial_image_{i}.png`, `perturbation_{i}.png`.
 
+  Illustration of the DoS-style perturbation that reduces or removes YOLO detections.
+
+  ![Detection DoS illustration](technicalReport/images/DoSAdversarial.png)
+
 ### 2) Targeted Region Transfer (strong localized blend)
 - Idea: Transfer the visual appearance of a target plate’s ROI into the source image’s detected plate ROI, enforcing a bounded delta and smoothing edges to remain plausible.
 - Steps:
@@ -62,6 +124,16 @@ This README summarizes the experimental setup, methods, evaluation procedure, an
 - Outputs:
   - Console logs with bbox, confidence, IoU to target.
   - Visualization saved: `adv_region_transfer_strong.png` plus side-by-side plots in the notebook.
+
+
+  Example of transferring a target plate’s ROI appearance into a source frame.
+
+  ![Original source image](technicalReport/images/original_image_0.png)
+
+  ![Target image](technicalReport/images/target_original.jpg)
+
+  ![Targeted region transfer result](technicalReport/images/adv_region_transfer.png)
+
 
 ### 3) Imperceptible OCR Attack (edge-weighted, gradient-free search)
 - Goal: Change OCR text with visually subtle, localized perturbations restricted to high-frequency regions of the plate.
@@ -77,6 +149,15 @@ This README summarizes the experimental setup, methods, evaluation procedure, an
 - Outputs:
   - Console prints showing OCR text and confidence per step.
   - Saved images: `tgt_image.png`, `adv_fgsm_sweep.png` (with side-by-side and amplified |Δ|).
+
+  Representative frames from the OCR-focused attack showing iterative loop.
+
+  ![OCR attack overview](technicalReport/images/OCR_attack.png)
+
+  ![Perturbed region](technicalReport/images/OCR_attack2.png)
+
+  ![Attack result](technicalReport/images/imagen.png)
+
 
 ## Metrics & Reporting
 - Detection DoS:
@@ -109,173 +190,27 @@ This README summarizes the experimental setup, methods, evaluation procedure, an
 ## Ethical Use
 This work is for academic research on robustness, safety, and defenses of computer vision systems. Do not deploy or apply these techniques for unlawful or unethical purposes. Always follow local laws and institutional review policies when working with license plate imagery.
 
-## CPS Integration: Man-in-the-Middle Threat Model
-- Goal: Study a cyber-physical system (CPS) setting where an attacker intercepts the video link between a camera and the ANPR system to craft adversarial frames on-the-fly before they reach inference.
-- Topology (example): IP Camera (RTSP/HTTP/ONVIF) → Edge/Gateway (optional) → ANPR Service.
-- Adversary position: Transparent network proxy between camera and ANPR that decodes frames, perturbs them, re-encodes, and forwards with minimal delay.
-
-### Assumptions and Constraints
-- Stream protocols: RTSP/RTP (H.264/H.265), HTTP-MJPEG, or proprietary vendor streams.
-- Capability: Attacker can read/modify frames in transit but cannot break end-to-end TLS/SRTP if enabled and correctly configured.
-- Real-time budget: Maintain 25–30 FPS and keep added latency below 30–60 ms per frame for operational viability.
-- Compute: Lightweight GPU (preferred) or CPU for decode/encode and perturbation; batching is limited in streaming scenarios.
-
-### Prototype MITM Pipeline (Research Environment)
-Two practical paths to emulate a MITM without touching production systems:
-
-1) RTSP restream + adversarial transform
-- Use an RTSP server (e.g., MediaMTX) to host two paths: `raw` (ingest) and `adv` (egress).
-- Ingest the camera stream into `raw` and publish adversarially-perturbed frames to `adv`.
-
-Example steps (conceptual):
-1. Ingest camera → `raw` using ffmpeg:
-```bash
-ffmpeg -rtsp_transport tcp -i rtsp://CAMERA_HOST/stream -c copy -f rtsp rtsp://localhost:8554/raw
-```
-2. Subscribe to `raw`, perturb frames with Python (OpenCV), and push to `adv` via ffmpeg stdin:
-```python
-import cv2, subprocess, numpy as np
-from pathlib import Path
-
-# Simplified hooks from the notebook
-def fgsm_attack_simple(model, image, epsilon, targeted_region=None):
-  adv = image.astype(np.float32)
-  noise = np.random.uniform(-epsilon, epsilon, image.shape).astype(np.float32)
-  if targeted_region is not None:
-    x1,y1,x2,y2 = targeted_region
-    mask = np.zeros_like(adv); mask[y1:y2, x1:x2] = 1
-    noise *= mask
-  adv = np.clip(adv + noise, 0, 255).astype(np.uint8)
-  return adv
-
-cap = cv2.VideoCapture("rtsp://localhost:8554/raw", cv2.CAP_FFMPEG)
-ok, frame = cap.read(); assert ok
-H, W = frame.shape[:2]
-
-# ffmpeg process to publish to adv path (bgr24 rawvideo → H.264 → RTSP)
-cmd = [
-  "ffmpeg","-y","-f","rawvideo","-pix_fmt","bgr24","-s",f"{W}x{H}","-r","25","-i","-",
-  "-an","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-f","rtsp","rtsp://localhost:8554/adv"
-]
-proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-
-# Optional: load YOLO model here if bbox targeting is desired
-model = None  # placeholder; reuse your notebook model if running in the same env
-bbox = None   # supply bbox per-frame from a lightweight detector, or default to full-frame
-
-while True:
-  ok, frame = cap.read()
-  if not ok: break
-  # Apply localized or full-frame perturbation
-  adv = fgsm_attack_simple(model, frame[..., ::-1], epsilon=10, targeted_region=bbox)  # expects RGB if reusing notebook code
-  adv_bgr = adv[..., ::-1]
-  proc.stdin.write(adv_bgr.tobytes())
-
-cap.release(); proc.stdin.close(); proc.wait()
-```
-3. Point the ANPR system to `rtsp://localhost:8554/adv` instead of the original camera URL.
-
-2) HTTP/MJPEG proxy (simpler demo)
-- Wrap `cv2.VideoCapture` on the camera stream and serve a multipart MJPEG endpoint with perturbed frames (Flask/FastAPI). Many ANPR stacks accept HTTP streams for testing.
-
-Minimal sketch:
-```python
-from flask import Flask, Response
-import cv2, numpy as np
-
-app = Flask(__name__)
-cap = cv2.VideoCapture("rtsp://CAMERA/stream", cv2.CAP_FFMPEG)
-
-def gen():
-  while True:
-    ok, bgr = cap.read()
-    if not ok: break
-    # apply perturbation (full-frame or ROI)
-    pert = (bgr.astype(np.float32) + np.random.uniform(-10,10,bgr.shape)).clip(0,255).astype(np.uint8)
-    ok, jpg = cv2.imencode('.jpg', pert, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    if not ok: continue
-    yield (b"--frame\r\n"
-         b"Content-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n")
-
-@app.route('/video')
-def video():
-  return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-app.run(host='0.0.0.0', port=5000)
-```
-
-### Evaluation in Streaming Context
-- Measure per-frame latency and throughput (FPS) before/after MITM.
-- Track attack success rate over time windows (e.g., % frames with missed detection, OCR changes/min).
-- Quantify visual deviation with PSNR/SSIM to gauge perceptibility.
-- Log re-encoding artifacts and bitrate drift (may affect OCR and detectability).
-
-### Defenses to Consider
-- Transport: SRTP/TLS with mutual auth; disable insecure fallbacks; signed frames or watermarking at the camera.
-- Content checks: Temporal consistency of detections/OCR, sudden confidence drops, perturbation fingerprinting on plate ROI.
-- Model-side: Adversarial training, test-time augmentations, randomized crops/denoise on ROI, ensemble checks.
-- Operational: Monitor latency/bitrate anomalies; restrict who can act as RTSP/HTTP sources; network segmentation.
-
-Note: All MITM experiments should be run in a controlled, ethical testbed with owned/consented devices and no impact on real traffic.
-
-### MQTT Transport Variant
-- Pipeline: Camera/Edge publishes encoded frames to an MQTT broker (e.g., `cameras/cam01/frame`), ANPR subscribes and decodes.
-- Payloads: Commonly JPEG bytes (raw) or Base64-encoded JPEG inside a JSON envelope (optionally with timestamps/seq).
-- QoS: Use QoS 0 or 1 for low-latency streaming; QoS 2 typically adds too much overhead. Disable `retain` for live streams.
-
-MITM options over MQTT:
-- Broker bridge: A downstream broker bridges topics from an upstream broker, transforming payloads in between.
-- Client-side proxy: A subscriber to source topics that republishes perturbed frames to mirror topics (e.g., `.../frame_adv`). ANPR is pointed at the adv topic.
-
-Security & performance notes:
-- Enable TLS (`mqtts`) and client auth to prevent easy interception; enforce authorization per topic.
-- Expect broker message size limits; use JPEG quality control to keep payloads <~512KB/frame.
-- Measure end-to-end delay using embedded timestamps (`ts`) and compute perturbation success/failure over moving windows.
-
 ## References
 - Ultralytics YOLO: https://docs.ultralytics.com/
 - PaddleOCR: https://github.com/PaddlePaddle/PaddleOCR
 - Kaggle Dataset (Spain License Plate): https://www.kaggle.com/datasets/unidpro/spain-license-plate-dataset
 
-## Acknowledgments
-- Open-source contributors of Ultralytics, PaddleOCR, and the dataset authors.
-- The VS Code environment and tooling used to run and document experiments.
 
-## Attack pipeline illustrations
+## How to Cite
+If you use this work in your research, academic projects, or publications, please include the corresponding citation:
 
-### Baseline vs. Adversarial Examples
-Side-by-side examples of original and perturbed frames used in experiments.
-
-![Original sample image](technicalReport/images/original_image_0.png)
-
-![Adversarial sample image](technicalReport/images/adversarial_image_0.png)
-
-### Detection DoS (Noise-Based Perturbation)
-Illustration of the DoS-style perturbation that reduces or removes YOLO detections.
-
-![Detection DoS illustration](technicalReport/images/DoSAdversarial.png)
-
-### Targeted Region Transfer
-Example of transferring a target plate’s ROI appearance into a source frame.
+A. de Castro, «Adversarial Machine Learning Attacks on Automatic Number Plate Recognition Systems». Zenodo, dic. 13, 2025. doi: 10.5281/zenodo.18302845.
 
 
-![Target image](technicalReport/images/target_original.jpg)
+## Technical Report
+The attack model and adversarial ML methodology implemented in this repository
+are described in detail in the following technical report:
 
-![Targeted region transfer result](technicalReport/images/adv_region_transfer.png)
+> A. de Castro. *Adversarial Machine Learning Attacks on Automatic Number Plate Recognition Systems*.
+> Technical Report, Zenodo, 2025. 
 
-### Imperceptible OCR Attack (Localized, Edge-Weighted)
-Representative frames from the OCR-focused attack showing iterative loop.
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18302845.svg)](https://doi.org/10.5281/zenodo.18302845)
 
-![OCR attack overview](technicalReport/images/OCR_attack.png)
 
-![Perturbed region](technicalReport/images/OCR_attack2.png)
 
-![Attack result](technicalReport/images/imagen.png)
-
-### Threat Model Diagrams
-High-level diagrams of attacker position and capabilities in a networked ANPR setting.
-
-![](technicalReport/images/AdversarialML_attacker_machine.drawio.png)
-
-![Threat model for Black Box Scenario](technicalReport/images/AdversarialML_attacker_net.drawio.png)
 
