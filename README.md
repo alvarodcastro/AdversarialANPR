@@ -76,6 +76,7 @@ Research notebook accompanying a broader research effort on the robustness of mo
 - Dataset: Spain License Plate Dataset from Kaggle
   - Source: `unidpro/spain-license-plate-dataset` (downloaded via `kagglehub.dataset_download(...)`).
   - The notebook automatically downloads and lists a subset of `.jpg`/`.png` files for experiments.
+  - Or here: https://www.kaggle.com/datasets/unidpro/spain-license-plate-dataset
 
 ## Models
 - Detector: YOLO (Ultralytics) loaded from a local checkpoint.
